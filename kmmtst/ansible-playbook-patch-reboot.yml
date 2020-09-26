@@ -1,0 +1,53 @@
+# ansible-playbook patchreboot.yml --extra-vars "host=10.10.11.70" --user ranjith
+
+---
+- hosts: "{{ host }}"
+  become: yes
+  become_method: sudo
+  tasks:
+    - name: running prepatch info commands
+      shell: |
+        df -hP
+        cat /etc/resolv.conf
+        ntpstat
+      register: prepatch
+      ignore_errors: True
+    - name: removing old prepatch info file
+      local_action: file path={{ playbook_dir }}/{{ inventory_hostname }}-prepatch.txt state=absent
+    - name: storing prepatch info
+      local_action: copy content={{ prepatch.stdout }} dest={{ playbook_dir }}/{{ inventory_hostname }}-prepatch.txt
+    - name: upgrade all packages
+      yum:
+        name: '*'
+        state: latest
+    - name: restart server
+      command: /sbin/reboot
+      async: 0
+      poll: 0
+      ignore_errors: true
+    - name: Pause for 180 seconds
+      pause: minutes=3
+    - name: wait for the server to restart
+      local_action: wait_for host={{ inventory_hostname }}
+                    port=22
+                    delay=15
+                    timeout=300
+                    state=started
+                    connect_timeout=15
+    - name: restarting ntpserver
+      service:
+        name: ntpd
+        state: restarted
+        enabled: yes
+    - name: running postpatch info commands
+      shell: |
+        df -hP
+        cat /etc/resolv.conf
+        sleep 10
+        ntpstat
+      register: postpatch
+      ignore_errors: True
+    - name: removing old postpatch info file
+      local_action: file path={{ playbook_dir }}/{{ inventory_hostname }}-postpatch.txt state=absent
+    - name: storing postpatch info
+      local_action: copy content={{ postpatch.stdout }} dest={{ playbook_dir }}/{{ inventory_hostname }}-postpatch.txt
